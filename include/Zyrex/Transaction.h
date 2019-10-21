@@ -27,9 +27,9 @@
 #ifndef ZYREX_TRANSACTION_H
 #define ZYREX_TRANSACTION_H
 
-#include <Windows.h>
 #include <Zycore/Defines.h>
 #include <Zycore/Status.h>
+#include <Zycore/API/Thread.h>
 #include <ZyrexExportConfig.h>
 
 #ifdef __cplusplus
@@ -47,7 +47,7 @@ extern "C" {
 /**
  * @brief   Starts a new transaction.
  *
- * @return  @c ZYREX_ERROR_SUCCESS if the function succeeded, an other zyrex status code, if not.
+ * @return  A zyan status code.
  */
 ZYREX_EXPORT ZyanStatus ZyrexTransactionBegin();
 
@@ -56,14 +56,14 @@ ZYREX_EXPORT ZyanStatus ZyrexTransactionBegin();
  *
  * @param   thread_handle   The handle of the thread.
  *
- * @return  @c ZYREX_ERROR_SUCCESS if the function succeeded, an other zyrex status code, if not.
+ * @return  A zyan status code.
  */
-ZYREX_EXPORT ZyanStatus ZyrexUpdateThread(HANDLE thread_handle);
+ZYREX_EXPORT ZyanStatus ZyrexUpdateThread(ZyanThread thread_handle);
 
 /**
  * @brief   Commits the current transaction.
  *
- * @return  @c ZYREX_ERROR_SUCCESS if the function succeeded, an other zyrex status code, if not.
+ * @return  A zyan status code.
  */
 ZYREX_EXPORT ZyanStatus ZyrexTransactionCommit();
 
@@ -72,14 +72,14 @@ ZYREX_EXPORT ZyanStatus ZyrexTransactionCommit();
  *
  * @param   failed_operation    Receives a pointer to the operation that failed the transaction.
  *
- * @return  @c ZYREX_ERROR_SUCCESS if the function succeeded, an other zyrex status code, if not.
+ * @return  A zyan status code.
  */
 ZYREX_EXPORT ZyanStatus ZyrexTransactionCommitEx(const void** failed_operation);
 
 /**
  * @brief   Cancels the current transaction.
  *
- * @return  @c ZYREX_ERROR_SUCCESS if the function succeeded, an other zyrex status code, if not.
+ * @return  A zyan status code.
  */
 ZYREX_EXPORT ZyanStatus ZyrexTransactionAbort();
 
@@ -87,38 +87,38 @@ ZYREX_EXPORT ZyanStatus ZyrexTransactionAbort();
 /* Hook installation                                                                              */
 /* ---------------------------------------------------------------------------------------------- */
 
-/**
- * @brief   Attaches an inline hook.
- *
- * @param   address     Pointer to the code address. Receives the trampoline address, if the
- *                      transaction succeeded.
- * @param   callback    The callback address.
- *
- * @return  @c ZYREX_ERROR_SUCCESS if the function succeeded, an other zyrex status code, if not.
- */
-ZYREX_EXPORT ZyanStatus ZyrexAttachInlineHook(const void** address, const void* callback);
-
-/**
- * @brief   Attaches an exception hook.
- *
- * @param   address     Pointer to the code address. Receives the trampoline address, if the
- *                      transaction succeeded.
- * @param   callback    The callback address.
- *
- * @return  @c ZYREX_ERROR_SUCCESS if the function succeeded, an other zyrex status code, if not.
- */
-ZYREX_EXPORT ZyanStatus ZyrexAttachExceptionHook(const void** address, const void* callback);
-
-/**
- * @brief   Attaches a context hook.
- *
- * @param   address     Pointer to the code address. Receives the trampoline address, if the
- *                      transaction succeeded.
- * @param   callback    The callback address.
- *
- * @return  @c ZYREX_ERROR_SUCCESS if the function succeeded, an other zyrex status code, if not.
- */
-ZYREX_EXPORT ZyanStatus ZyrexAttachContextHook(const void** address, const void* callback);
+///**
+// * @brief   Attaches an inline hook.
+// *
+// * @param   address     Pointer to the code address. Receives the trampoline address, if the
+// *                      transaction succeeded.
+// * @param   callback    The callback address.
+// *
+// * @return  A zyan status code.
+// */
+//ZYREX_EXPORT ZyanStatus ZyrexAttachInlineHook(const void** address, const void* callback);
+//
+///**
+// * @brief   Attaches an exception hook.
+// *
+// * @param   address     Pointer to the code address. Receives the trampoline address, if the
+// *                      transaction succeeded.
+// * @param   callback    The callback address.
+// *
+// * @return  A zyan status code.
+// */
+//ZYREX_EXPORT ZyanStatus ZyrexAttachExceptionHook(const void** address, const void* callback);
+//
+///**
+// * @brief   Attaches a context hook.
+// *
+// * @param   address     Pointer to the code address. Receives the trampoline address, if the
+// *                      transaction succeeded.
+// * @param   callback    The callback address.
+// *
+// * @return  A zyan status code.
+// */
+//ZYREX_EXPORT ZyanStatus ZyrexAttachContextHook(const void** address, const void* callback);
 
 // TODO: IAT/EAT, VTable, ..
 
@@ -135,4 +135,5 @@ ZYREX_EXPORT ZyanStatus ZyrexAttachContextHook(const void** address, const void*
 #ifdef __cplusplus
 }
 #endif
+
 #endif /* ZYREX_TRANSACTION_H */

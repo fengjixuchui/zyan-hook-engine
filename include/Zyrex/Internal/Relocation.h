@@ -24,45 +24,58 @@
 
 ***************************************************************************************************/
 
-#include <windows.h>
-#include <Zyrex/Internal/InlineHook.h>
-#include <Zyrex/Internal/Utils.h>
+#ifndef ZYREX_RELOCATION_H
+#define ZYREX_RELOCATION_H
+
+#include <Zycore/Types.h>
+#include <Zyrex/Internal/Trampoline.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* ============================================================================================== */
 /* Functions                                                                                      */
 /* ============================================================================================== */
 
 /* ---------------------------------------------------------------------------------------------- */
-/* Attaching and detaching                                                                        */
+/*                                                                                                */
 /* ---------------------------------------------------------------------------------------------- */
 
-ZyanStatus ZyrexAttachInlineHook(void* address, const void* callback)
-{
-    // TODO: Use platform independent APIs
-
-    // Make 
-    DWORD old_protect;
-    if (!VirtualProtect((LPVOID)address, ZYREX_SIZEOF_RELATIVE_JUMP, PAGE_EXECUTE_READWRITE, 
-        &old_protect))
-    {
-        return ZYAN_STATUS_BAD_SYSTEMCALL;
-    }
-
-    ZyrexWriteRelativeJump(address, (ZyanUPointer)callback);
-
-    if (!VirtualProtect((LPVOID)address, ZYREX_SIZEOF_RELATIVE_JUMP, old_protect, &old_protect))
-    {
-        return ZYAN_STATUS_BAD_SYSTEMCALL;
-    }
-
-    if (!FlushInstructionCache(GetCurrentProcess(), (LPCVOID)address, ZYREX_SIZEOF_RELATIVE_JUMP))
-    {
-        return ZYAN_STATUS_BAD_SYSTEMCALL;
-    }
-
-    return ZYAN_STATUS_SUCCESS;
-}
+/**
+ * @brief   Copies all instructions from the `source` buffer to the `destination` address until
+ *          at least `min_bytes_to_reloc` bytes are read.
+ *
+ * @param   source              A pointer to the source buffer.
+ * @param   source_length       The maximum amount of bytes that can be safely read from the 
+ *                              source buffer.
+ * @param   destination         A pointer to the destination buffer.
+ * @param   destination_length  The maximum amount of bytes that can be safely written to the
+ *                              destination buffer.
+ * @param   min_bytes_to_reloc  Specifies the minimum amount of bytes that need to be relocated
+ *                              to the trampoline (usually equals the size of the branch
+ *                              instruction used for hooking).
+ *                              This function might copy more bytes on demand to keep individual
+ *                              instructions intact.
+ * @param   flags               Additional flags to control how the function handles some special
+ *                              instructions.
+ * @param   translation_map     The instruction translation map.
+ * @param   bytes_read          Returns the number of bytes read from the source buffer.
+ * @param   bytes_written       Returns the number of bytes written to the destination buffer.
+ *
+ * @return  A zyan status code.
+ */
+ZyanStatus ZyrexRelocateCode(const void* source, ZyanUSize source_length, void* destination, 
+    ZyanUSize destination_length, ZyanUSize min_bytes_to_reloc, ZyrexCodeRelocationFlags flags, 
+    ZyrexInstructionTranslationMap* translation_map, ZyanUSize* bytes_read, 
+    ZyanUSize* bytes_written);
 
 /* ---------------------------------------------------------------------------------------------- */
 
 /* ============================================================================================== */
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* ZYREX_RELOCATION_H */

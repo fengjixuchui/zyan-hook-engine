@@ -36,61 +36,6 @@
 /* ============================================================================================== */
 
 /* ---------------------------------------------------------------------------------------------- */
-/* Trampoline chunk                                                                               */
-/* ---------------------------------------------------------------------------------------------- */
-
-/**
- * @brief   Defines the `ZyrexTrampolineChunk` struct.
- */
-typedef struct ZyrexTrampolineChunk_
-{
-    /**
-     * @brief   Signals, if the trampoline chunk is currently in use.
-     */
-    ZyanBool is_used;
-
-#if defined(ZYAN_X64)
-
-    /**
-     * @brief   The address of the callback function.
-     */
-    ZyanUPointer callback_address;
-    /**
-     * @brief   The absolute jump to the callback function.
-     */
-    ZyanU8 callback_jump[ZYREX_SIZEOF_ABSOLUTE_JUMP];
-
-#endif
-
-    /**
-     * @brief   The backjump address.
-     */
-    ZyanUPointer backjump_address;
-    /**
-     * @brief   The buffer that holds the trampoline code and the backjump to the hooked function.
-     */
-    ZyanU8 code_buffer[ZYREX_TRAMPOLINE_MAX_CODE_SIZE_WITH_BACKJUMP + 
-                       ZYREX_TRAMPOLINE_MAX_CODE_SIZE_BONUS];
-    /**
-     * @brief   The number of instruction bytes in the code buffer (not counting the backjump
-     *          instruction).
-     */
-    ZyanU8 code_buffer_size;
-    /**
-     * @brief   The instruction translation map.
-     */
-    ZyrexInstructionTranslationMap translation_map;
-    /**
-     * @brief   The buffer that holds the original instruction bytes saved from the hooked function.
-     */
-    ZyanU8 original_code[ZYREX_TRAMPOLINE_MAX_CODE_SIZE];
-    /**
-     * @brief   The number of instruction bytes saved from the hooked function.
-     */
-    ZyanU8 original_code_size;
-} ZyrexTrampolineChunk;
-
-/* ---------------------------------------------------------------------------------------------- */
 /* Trampoline region                                                                              */
 /* ---------------------------------------------------------------------------------------------- */
 
@@ -536,6 +481,10 @@ static ZyanStatus ZyrexTrampolineRegionRemove(ZyrexTrampolineRegion* region)
  */
 static ZyanStatus ZyrexTrampolineRegionProtect(ZyrexTrampolineRegion* region)
 {
+    ZYAN_ASSERT(region);
+    ZYAN_ASSERT(g_trampoline_data.is_initialized);
+    ZYAN_ASSERT(ZYAN_IS_ALIGNED_TO((ZyanUPointer)region, g_trampoline_data.region_size));
+
     DWORD old_value;
     if (!VirtualProtect(region, sizeof(ZyrexTrampolineChunk), PAGE_EXECUTE_READ, &old_value))
     {
@@ -554,6 +503,10 @@ static ZyanStatus ZyrexTrampolineRegionProtect(ZyrexTrampolineRegion* region)
  */
 static ZyanStatus ZyrexTrampolineRegionUnprotect(ZyrexTrampolineRegion* region)
 {
+    ZYAN_ASSERT(region);
+    ZYAN_ASSERT(g_trampoline_data.is_initialized);
+    ZYAN_ASSERT(ZYAN_IS_ALIGNED_TO((ZyanUPointer)region, g_trampoline_data.region_size));
+
     DWORD old_value;
     if (!VirtualProtect(region, sizeof(ZyrexTrampolineChunk), PAGE_EXECUTE_READWRITE, &old_value))
     {
@@ -688,8 +641,8 @@ InitializeRegion:
 static ZyanStatus ZyrexTrampolineRegionFree(ZyrexTrampolineRegion* region)
 {
     ZYAN_ASSERT(region);
-    ZYAN_ASSERT((ZyanUPointer)region ==
-        ZYAN_ALIGN_DOWN((ZyanUPointer)region, g_trampoline_data.region_size));
+    ZYAN_ASSERT(g_trampoline_data.is_initialized);
+    ZYAN_ASSERT(ZYAN_IS_ALIGNED_TO((ZyanUPointer)region, g_trampoline_data.region_size));
 
     if (!VirtualFree(region, 0, MEM_RELEASE))
     {
@@ -717,20 +670,16 @@ static ZyanStatus ZyrexTrampolineRegionFree(ZyrexTrampolineRegion* region)
  *                              instructions intact.
  * @param   max_bytes_to_read   The maximum amount of bytes that can be safely read from the given
  *                              `address`.
- * @param   flags               Trampoline creation flags.
  *
  * @return  A zyan status code.
  */
 static ZyanStatus ZyrexTrampolineChunkInit(ZyrexTrampolineChunk* chunk, const void* address,
-    const void* callback, ZyanUSize min_bytes_to_reloc, ZyanUSize max_bytes_to_read,
-    ZyrexCodeRelocationFlags flags)
+    const void* callback, ZyanUSize min_bytes_to_reloc, ZyanUSize max_bytes_to_read)
 {
     ZYAN_ASSERT(chunk);
     ZYAN_ASSERT(address);
     ZYAN_ASSERT(callback);
     ZYAN_ASSERT(min_bytes_to_reloc <= max_bytes_to_read);
-
-    ZYAN_UNUSED(flags);
 
     chunk->is_used = ZYAN_TRUE;
 
@@ -738,6 +687,11 @@ static ZyanStatus ZyrexTrampolineChunkInit(ZyrexTrampolineChunk* chunk, const vo
 
     chunk->callback_address = (ZyanUPointer)callback;
     ZyrexWriteAbsoluteJump(&chunk->callback_jump, (ZyanUPointer)&chunk->callback_address);
+    if (!FlushInstructionCache(GetCurrentProcess(), &chunk->callback_jump, 
+        ZYREX_SIZEOF_ABSOLUTE_JUMP))
+    {
+        return ZYAN_STATUS_BAD_SYSTEMCALL;   
+    }
 
 #endif
 
@@ -745,8 +699,7 @@ static ZyanStatus ZyrexTrampolineChunkInit(ZyrexTrampolineChunk* chunk, const vo
     ZyanUSize bytes_written;
 
     // Relocate instructions
-    ZYAN_CHECK(ZyrexRelocateCode(address, max_bytes_to_read, chunk->code_buffer, 
-        sizeof(chunk->code_buffer), min_bytes_to_reloc, flags, &chunk->translation_map, 
+    ZYAN_CHECK(ZyrexRelocateCode(address, max_bytes_to_read, chunk, min_bytes_to_reloc, 
         &bytes_read, &bytes_written));
 
     // Write backjump
@@ -762,6 +715,17 @@ static ZyanStatus ZyrexTrampolineChunkInit(ZyrexTrampolineChunk* chunk, const vo
             bytes_remaining - ZYREX_SIZEOF_ABSOLUTE_JUMP);
     }
 
+    if (!FlushInstructionCache(GetCurrentProcess(), &chunk->code_buffer, 
+        ZYREX_TRAMPOLINE_MAX_CODE_SIZE_WITH_BACKJUMP + ZYREX_TRAMPOLINE_MAX_CODE_SIZE_BONUS))
+    {
+        return ZYAN_STATUS_BAD_SYSTEMCALL;   
+    }
+
+    // Backup original instructions
+    ZYAN_ASSERT(bytes_read <= ZYAN_ARRAY_LENGTH(chunk->original_code));
+    chunk->original_code_size = (ZyanU8)bytes_read;
+    ZYAN_MEMCPY(chunk->original_code, address, bytes_read);
+
     return ZYAN_STATUS_SUCCESS;
 }
 
@@ -772,16 +736,7 @@ static ZyanStatus ZyrexTrampolineChunkInit(ZyrexTrampolineChunk* chunk, const vo
 /* ============================================================================================== */
 
 ZyanStatus ZyrexTrampolineCreate(const void* address, const void* callback,
-    ZyanUSize min_bytes_to_reloc, ZyrexTrampoline* trampoline)
-{
-    return ZyrexTrampolineCreateEx(address, callback, min_bytes_to_reloc,
-        ZYREX_CODE_RELOC_FLAG_REWRITE_CALL |
-        ZYREX_CODE_RELOC_FLAG_REWRITE_JCXZ |
-        ZYREX_CODE_RELOC_FLAG_REWRITE_LOOP, trampoline);
-}
-
-ZyanStatus ZyrexTrampolineCreateEx(const void* address, const void* callback,
-    ZyanUSize min_bytes_to_reloc, ZyrexCodeRelocationFlags flags, ZyrexTrampoline* trampoline)
+    ZyanUSize min_bytes_to_reloc, ZyrexTrampolineChunk** trampoline)
 {
     if (!address || !callback || (min_bytes_to_reloc < 1) || !trampoline)
     {
@@ -813,7 +768,7 @@ ZyanStatus ZyrexTrampolineCreateEx(const void* address, const void* callback,
 #ifdef ZYAN_X64
 
     // Gather memory address lower and upper bounds in order to find a suitable memory region for
-    // the rampoline
+    // the trampoline
     ZyanUPointer lo = (ZyanUPointer)(-1);
     ZyanUPointer hi = 0;
     ZYAN_CHECK(ZyrexGetAddressRangeOfRelativeInstructions(address, source_size,
@@ -871,8 +826,7 @@ ZyanStatus ZyrexTrampolineCreateEx(const void* address, const void* callback,
 
     ZYAN_ASSERT(region->header.number_of_unused_chunks > 0);
 
-    status =
-        ZyrexTrampolineChunkInit(chunk, address, callback, min_bytes_to_reloc, source_size, flags);
+    status = ZyrexTrampolineChunkInit(chunk, address, callback, min_bytes_to_reloc, source_size);
     if (!ZYAN_SUCCESS(status))
     {
         if (is_new_region)
@@ -885,17 +839,6 @@ ZyanStatus ZyrexTrampolineCreateEx(const void* address, const void* callback,
         return status;
     }
 
-    trampoline->address_of_code = address;
-    trampoline->address_of_callback = callback;
-#ifdef ZYAN_X64
-    trampoline->address_of_callback_jump = &chunk->callback_jump;
-#endif
-    trampoline->address_of_trampoline_code = &chunk->code_buffer;
-    trampoline->address_of_original_code = &chunk->original_code;
-    trampoline->size_of_trampoline_code = chunk->code_buffer_size;
-    trampoline->size_of_original_code = chunk->original_code_size;
-    trampoline->translation_map = &chunk->translation_map;
-
     --region->header.number_of_unused_chunks;
     ZYAN_UNUSED(ZyrexTrampolineRegionProtect(region));
 
@@ -903,10 +846,12 @@ ZyanStatus ZyrexTrampolineCreateEx(const void* address, const void* callback,
     {
         ZYAN_UNUSED(ZyrexTrampolineRegionInsert(region));
     }
+
+    *trampoline = chunk;
     return ZYAN_STATUS_SUCCESS;
 }
 
-ZyanStatus ZyrexTrampolineFree(const ZyrexTrampoline* trampoline)
+ZyanStatus ZyrexTrampolineFree(ZyrexTrampolineChunk* trampoline)
 {
     if (!trampoline)
     {
@@ -917,7 +862,32 @@ ZyanStatus ZyrexTrampolineFree(const ZyrexTrampoline* trampoline)
         return ZYAN_STATUS_INVALID_OPERATION;
     }
 
-    // TODO:
+    const ZyanUPointer region_address = ZYAN_ALIGN_DOWN((ZyanUPointer)trampoline, 
+        g_trampoline_data.region_size);
+    ZyanUSize found_index;
+    const ZyanStatus status =
+        ZyanVectorBinarySearch(&g_trampoline_data.regions, &region_address, &found_index,
+            (ZyanComparison)&ZyanComparePointer);
+    ZYAN_CHECK(status);
+
+    if (status == ZYAN_STATUS_FALSE)
+    {
+        return ZYAN_STATUS_NOT_FOUND;
+    }
+
+    ZyrexTrampolineRegion* const region = (ZyrexTrampolineRegion*)region_address;
+    if (region->header.number_of_unused_chunks == g_trampoline_data.chunks_per_region - 1 - 1)
+    {
+        ZYAN_CHECK(ZyrexTrampolineRegionRemove(region));
+        ZYAN_CHECK(ZyrexTrampolineRegionFree(region));
+    }
+    else
+    {
+        ZYAN_CHECK(ZyrexTrampolineRegionUnprotect(region));
+        ++region->header.number_of_unused_chunks;
+        trampoline->is_used = ZYAN_FALSE;
+        ZYAN_CHECK(ZyrexTrampolineRegionProtect(region));
+    }
 
     ZyanUSize size;
     ZYAN_CHECK(ZyanVectorGetSize(&g_trampoline_data.regions, &size));
